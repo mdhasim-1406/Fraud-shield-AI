@@ -1,0 +1,36 @@
+# Environment
+.env
+.env.local
+.python-version
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Models (large files)
+models/
+*.faiss
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.history/
+.vscode/
+.idea/
+
+# Logs
+*.log
+nohup.out
+
+# OS
+.DS_Store
+Thumbs.db
