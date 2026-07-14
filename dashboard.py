@@ -270,7 +270,7 @@ def generate_analysis_instantly(transaction_data):
         formatted += f"\n\n**📋 Analysis Summary:**"
         formatted += f"\n• **Instant Analysis:** Completed in <0.001 seconds"
         formatted += f"\n• **Data Source:** Live transaction stream"
-        formatted += f"\n• **AI Models:** FinBERT + DeepSeek + RAG (Real-time)"
+        formatted += f"\n• **AI Models:** FinBERT + Local LLM + RAG (Real-time)"
         formatted += f"\n• **Recommendation:** {verdict} - Action Required"
 
         return formatted.strip()
@@ -305,7 +305,7 @@ INVESTIGATION SUMMARY
 
 This report contains the complete fraud investigation results including:
 • Transaction details and risk indicators
-• AI analysis from multiple models (FinBERT + DeepSeek + RAG)
+• AI analysis from multiple models (FinBERT + Local LLM + RAG)
 • Real-time pattern matching results
 • Instant investigation capabilities
 

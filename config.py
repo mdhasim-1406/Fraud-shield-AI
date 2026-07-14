@@ -1,5 +1,5 @@
 """
-Configuration management for Fraud Detection System
+Configuration management for Fraud Detection System — Local Only
 """
 import os
 from typing import Optional
@@ -8,20 +8,17 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+
 class Settings:
-    """Application settings with environment variable support"""
+    """Application settings — all local, no external API dependencies"""
 
-    # API Configuration
-    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
-    OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-
-    # Model Configuration
-    FAST_MODEL: str = os.getenv("FAST_MODEL", "deepseek/deepseek-chat-v3.1:free")
-    REASONING_MODEL: str = os.getenv("REASONING_MODEL", "deepseek/deepseek-chat-v3.1:free")
+    # Ollama Configuration
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "gemma2:2b")
 
     # API Settings
-    API_TIMEOUT: int = int(os.getenv("API_TIMEOUT", "30"))
-    MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
+    API_TIMEOUT: int = int(os.getenv("API_TIMEOUT", "60"))
+    MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "2"))
     BATCH_SIZE: int = int(os.getenv("BATCH_SIZE", "10"))
 
     # Server Configuration
@@ -51,6 +48,7 @@ class Settings:
     TOP_K_SIMILAR: int = 3
     EMBEDDING_DIMENSION: int = 384
 
+
 class Config:
     """Global configuration instance"""
     settings = Settings()
@@ -62,20 +60,12 @@ class Config:
 
     @classmethod
     def validate_config(cls) -> bool:
-        """Validate that all required configuration is present"""
-        required_vars = [
-            "OPENROUTER_API_KEY"
-        ]
-
-        missing_vars = []
-        for var in required_vars:
-            if not getattr(cls.settings, var):
-                missing_vars.append(var)
-
-        if missing_vars:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
+        """
+        Validate configuration.
+        No API keys required — purely local operation.
+        """
         return True
+
 
 # Global configuration instance
 config = Config()

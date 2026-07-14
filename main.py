@@ -19,7 +19,7 @@ import pandas as pd
 # Import our modules
 from data_loader import TransactionDataLoader, load_transaction_data
 from finbert_analyzer import FinBERTAnalyzer, analyze_financial_sentiment
-from deepseek_detector import DeepSeekFraudDetector, analyze_fraud_with_deepseek
+from deepseek_detector import OllamaFraudDetector, analyze_fraud_locally
 from rag_system import FraudKnowledgeBase, retrieve_similar_frauds
 from config import config
 from simulation_manager import run_simulation_loop
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Global variables for models (will be initialized on startup)
 data_loader: Optional[TransactionDataLoader] = None
 finbert_analyzer: Optional[FinBERTAnalyzer] = None
-deepseek_detector: Optional[DeepSeekFraudDetector] = None
+ollama_detector: Optional[OllamaFraudDetector] = None
 fraud_knowledge_base: Optional[FraudKnowledgeBase] = None
 
 # Global transaction store for live UI updates
@@ -75,7 +75,7 @@ class FraudAnalysisResponse(BaseModel):
     fraud_probability: float
     risk_level: str
     finbert_sentiment: Dict[str, Any]
-    deepseek_reasoning: Dict[str, Any]
+    llm_reasoning: Dict[str, Any]
     similar_frauds: List[Dict[str, Any]]
     final_verdict: str
     processing_time: float
@@ -114,7 +114,7 @@ class FeedbackRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown with robust background task management."""
-    global simulator_task, data_loader, finbert_analyzer, deepseek_detector, fraud_knowledge_base
+    global simulator_task, data_loader, finbert_analyzer, ollama_detector, fraud_knowledge_base
     logger.info("Starting Fraud Detection System...")
 
     # Startup
@@ -128,17 +128,15 @@ async def lifespan(app: FastAPI):
         finbert_analyzer = FinBERTAnalyzer()
         logger.info("FinBERT analyzer initialized")
 
-        # Initialize DeepSeek detector (requires API key)
-        if config.settings.OPENROUTER_API_KEY:
-            deepseek_detector = DeepSeekFraudDetector(
-                api_key=config.settings.OPENROUTER_API_KEY,
-                base_url=config.settings.OPENROUTER_BASE_URL,
-                timeout=config.settings.API_TIMEOUT,
-                max_retries=config.settings.MAX_RETRIES
-            )
-            logger.info("DeepSeek detector initialized")
-        else:
-            logger.warning("DeepSeek API key not found - fraud detection will be limited")
+        # Initialize local Ollama detector (fully offline)
+        ollama_detector = OllamaFraudDetector(
+            base_url=config.settings.OLLAMA_BASE_URL,
+            fast_model=config.settings.LLM_MODEL,
+            reasoning_model=config.settings.LLM_MODEL,
+            timeout=config.settings.API_TIMEOUT,
+            max_retries=config.settings.MAX_RETRIES
+        )
+        logger.info(f"Ollama detector initialized with model: {config.settings.LLM_MODEL}")
 
         # Initialize RAG knowledge base
         fraud_knowledge_base = FraudKnowledgeBase()
@@ -197,7 +195,7 @@ def get_models():
     return {
         "data_loader": data_loader,
         "finbert_analyzer": finbert_analyzer,
-        "deepseek_detector": deepseek_detector,
+        "ollama_detector": ollama_detector,
         "fraud_knowledge_base": fraud_knowledge_base
     }
 
@@ -220,7 +218,7 @@ async def health_check():
         "models_loaded": {
             "data_loader": data_loader is not None,
             "finbert_analyzer": finbert_analyzer is not None,
-            "deepseek_detector": deepseek_detector is not None,
+            "ollama_detector": ollama_detector is not None,
             "fraud_knowledge_base": fraud_knowledge_base is not None
         }
     }
@@ -233,7 +231,7 @@ async def analyze_transaction(transaction: Transaction, models=Depends(get_model
     This endpoint processes a single transaction through the complete fraud detection pipeline:
     1. FinBERT sentiment analysis
     2. RAG similarity search
-    3. DeepSeek reasoning
+    3. Local LLM reasoning
     4. Weighted scoring and final verdict
     """
     start_time = time.time()
@@ -267,7 +265,7 @@ async def analyze_transaction(transaction: Transaction, models=Depends(get_model
             logger.warning(f"RAG system error: {rag_error}")
             similar_cases = []  # Use empty list as fallback
 
-        # Step 4: Prepare DeepSeek analysis data
+        # Step 4: Prepare LLM analysis data
         # Create prompt data similar to data_loader format
         transaction_prompt_data = {
             'transaction_id': transaction.transaction_id,
@@ -276,25 +274,29 @@ async def analyze_transaction(transaction: Transaction, models=Depends(get_model
             'is_high_value': transaction.transaction_amount > config.settings.HIGH_VALUE_THRESHOLD
         }
 
-        # Step 5: DeepSeek fraud analysis
-        if models["deepseek_detector"]:
-            deepseek_result = models["deepseek_detector"].analyze_transaction(transaction_prompt_data)
+        # Step 5: Local LLM fraud analysis
+        if models["ollama_detector"]:
+            llm_result = models["ollama_detector"].analyze_transaction(transaction_prompt_data)
         else:
-            # Fallback when DeepSeek is not available
-            deepseek_result = {
+            # Fallback when LLM is not available
+            llm_result = {
                 "fraud_probability": 0.5,
                 "risk_level": "MEDIUM",
-                "reasoning_steps": ["DeepSeek detector not available"],
-                "red_flags": ["API unavailable"],
+                "reasoning_steps": ["Local LLM detector not available"],
+                "red_flags": ["LLM unavailable"],
                 "confidence": 0.0,
                 "recommendation": "REVIEW",
                 "analysis_mode": "fallback"
             }
 
-        # Step 6: Combine results with weighted scoring
+        # Step 6: Combine results with weighted scoring (60% LLM, 30% FinBERT, 10% historical)
+        historical_risk = (
+            max(c.similarity_score for c in similar_cases) if similar_cases else 0.0
+        )
         final_probability = (
             finbert_result.get('overall_risk_score', 0.5) * 0.3 +
-            deepseek_result.get('fraud_probability', 0.5) * 0.7
+            llm_result.get('fraud_probability', 0.5) * 0.6 +
+            historical_risk * 0.1
         )
 
         # Determine final verdict
@@ -323,7 +325,7 @@ async def analyze_transaction(transaction: Transaction, models=Depends(get_model
             fraud_probability=round(final_probability, 4),
             risk_level=risk_level,
             finbert_sentiment=finbert_result,
-            deepseek_reasoning=deepseek_result,
+            llm_reasoning=llm_result,
             similar_frauds=[
                 {
                     "transaction_id": case.case.transaction_id,
@@ -413,29 +415,36 @@ async def analyze_batch(request: BatchAnalysisRequest, models=Depends(get_models
                 logger.warning(f"RAG system error in batch: {rag_error}")
                 similar_cases = []  # Use empty list as fallback
 
-            # DeepSeek analysis
+            # Local LLM analysis
             prompt_data = {
                 'transaction_id': trans.transaction_id,
                 'analysis_prompt': trans_text,
                 'amount': trans.transaction_amount,
                 'is_high_value': trans.transaction_amount > 1000
             }
-            if models["deepseek_detector"]:
-                deepseek_result = models["deepseek_detector"].analyze_transaction(prompt_data)
+            if models["ollama_detector"]:
+                llm_result_sync = models["ollama_detector"].analyze_transaction(prompt_data)
             else:
-                # Fallback when DeepSeek is not available
-                deepseek_result = {
+                # Fallback when LLM is not available
+                llm_result_sync = {
                     "fraud_probability": 0.5,
                     "risk_level": "MEDIUM",
-                    "reasoning_steps": ["DeepSeek detector not available"],
-                    "red_flags": ["API unavailable"],
+                    "reasoning_steps": ["Local LLM detector not available"],
+                    "red_flags": ["LLM unavailable"],
                     "confidence": 0.0,
                     "recommendation": "REVIEW",
                     "analysis_mode": "fallback"
                 }
 
-            # Combine results
-            final_prob = finbert_result.get('overall_risk_score', 0.5) * 0.3 + deepseek_result.get('fraud_probability', 0.5) * 0.7
+            # Combine results (60% LLM, 30% FinBERT, 10% historical)
+            historical_risk = (
+                max(c.similarity_score for c in similar_cases) if similar_cases else 0.0
+            )
+            final_prob = (
+                finbert_result.get('overall_risk_score', 0.5) * 0.3 +
+                llm_result_sync.get('fraud_probability', 0.5) * 0.6 +
+                historical_risk * 0.1
+            )
 
             if final_prob >= 0.8:
                 verdict = "BLOCK"
@@ -449,7 +458,7 @@ async def analyze_batch(request: BatchAnalysisRequest, models=Depends(get_models
                 fraud_probability=round(final_prob, 4),
                 risk_level="HIGH" if final_prob >= 0.6 else "MEDIUM" if final_prob >= 0.4 else "LOW",
                 finbert_sentiment=finbert_result,
-                deepseek_reasoning=deepseek_result,
+                llm_reasoning=llm_result_sync,
                 similar_frauds=[
                     {
                         "transaction_id": case.case.transaction_id,
@@ -479,7 +488,7 @@ async def analyze_batch(request: BatchAnalysisRequest, models=Depends(get_models
                     fraud_probability=0.5,
                     risk_level="MEDIUM",
                     finbert_sentiment={"error": str(e)},
-                    deepseek_reasoning={"error": str(e)},
+                    llm_reasoning={"error": str(e)},
                     similar_frauds=[],
                     final_verdict="REVIEW",
                     processing_time=0.0,
@@ -530,7 +539,7 @@ async def get_system_stats():
             model_status={
                 "data_loader": "loaded" if data_loader else "not_loaded",
                 "finbert_analyzer": "loaded" if finbert_analyzer else "not_loaded",
-                "deepseek_detector": "loaded" if deepseek_detector else "not_loaded",
+                "ollama_detector": "loaded" if ollama_detector else "not_loaded",
                 "fraud_knowledge_base": "loaded" if fraud_knowledge_base else "not_loaded"
             }
         )
@@ -551,26 +560,26 @@ async def get_transaction_analysis(transaction_id: str, models=Depends(get_model
         if not transaction_data:
             raise HTTPException(status_code=404, detail="Transaction not found")
 
-        # If we have DeepSeek detector, run analysis
-        if models["deepseek_detector"]:
+        # If we have Ollama detector, run analysis
+        if models["ollama_detector"]:
             try:
-                analysis_result = models["deepseek_detector"].analyze_transaction(transaction_data)
+                analysis_result = models["ollama_detector"].analyze_transaction(transaction_data)
                 return {
                     "transaction": transaction_data,
                     "analysis": analysis_result,
                     "retrieved_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
             except Exception as e:
-                logger.warning(f"DeepSeek analysis failed: {e}")
+                logger.warning(f"Local LLM analysis failed: {e}")
                 return {
                     "transaction": transaction_data,
-                    "analysis": {"error": f"DeepSeek analysis failed: {str(e)}"},
+                    "analysis": {"error": f"Local LLM analysis failed: {str(e)}"},
                     "retrieved_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
         else:
             return {
                 "transaction": transaction_data,
-                "analysis": {"error": "DeepSeek detector not available"},
+                "analysis": {"error": "Local LLM detector not available"},
                 "retrieved_at": time.strftime("%Y-%m-%d %H:%M:%S")
             }
 
