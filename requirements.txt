@@ -1,38 +1,34 @@
 # API Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-python-multipart==0.0.6
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+python-multipart>=0.0.9
 
 # Data Processing
-pandas==2.1.3
-numpy==1.26.4
-scikit-learn==1.3.0
+pandas>=2.1.3
+numpy>=1.26.4
+scikit-learn>=1.3.0
 
 # ML Models
-torch==2.4.1
-transformers==4.44.2
-sentence-transformers==3.1.1
+torch>=2.4.0
+transformers>=4.44.0
+sentence-transformers>=3.0.0
 
 # Vector Database
-faiss-cpu==1.8.0.post1
+faiss-cpu>=1.8.0
 
-# HTTP / API Client (used for Ollama OpenAI-compatible endpoint)
-openai==1.3.5
-httpx==0.25.2
+# HTTP / API Client
+openai>=1.3.0
+httpx>=0.25.0
 
 # UI
 gradio>=4.44.0
 
 # Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
 
 # Utilities
-python-dotenv==1.0.0
-structlog==23.2.0
-
-# System Requirements (install separately)
-# Ollama - https://ollama.ai - serves local LLMs
-# FFmpeg (optional, for audio processing future use)
+python-dotenv>=1.0.0
+structlog>=23.2.0
